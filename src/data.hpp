@@ -11,8 +11,8 @@
 struct Point {
     float x;
     float y;
-    float group;
-    sf::Color color = sf::Color::Blue;
+    float group = 0;
+    sf::Color color = sf::Color::White;
 };
 
 struct Data {
@@ -31,7 +31,17 @@ struct Data {
         }
     }
 
-    Data(std::string path = "../data/data.csv") {
+    void load(
+        float display_x,
+        float display_y,
+        float buffer = 50,
+        std::string path = "../data/data.csv"
+    ) {
+
+        if (contents.size() > 0) {
+            std::cout << "Warning: load() cancelled because data exists!\n";
+            return;
+        }
 
         if (!std::filesystem::is_regular_file(path)) {
             std::cout << path + " is not a known regular file!\n";
@@ -63,13 +73,30 @@ struct Data {
                 }
                 
                 if (position == 2) {
-                    point.group = result;
-                    if (result > 0.5) {
-                        point.color = sf::Color::Red;
+                    if (result == 0) {
+                        point.group = result;
+                        point.color = {21, 126, 192};
+                    } else if (result == 1) {
+                        point.group = result;
+                        point.color = {245, 145, 48};
+                    } else {
+                        std::cout << "The third column must be 0 or 1!\n";
+                        std::exit(1);
                     }
                 }
                 
                 position += 1;
+            }
+
+            if (position != 3) {
+                std::cout << "Each row must contain 3 values!\n";
+                std::cout << "Line " << index << " is malformed\n";
+                std::exit(1);
+            }
+
+            if (index > 1000) {
+                std::cout << "Warning: only the first 1000 points are used\n";
+                break;
             }
 
             contents.push_back(point);
@@ -77,9 +104,7 @@ struct Data {
         }
 
         file.close();
-    }
-
-    void adjust(float display_x, float display_y, float buffer = 50) {
+        
         for (auto& i : contents) {
             i.x = (i.x * (display_x - buffer * 2) + buffer);
             i.y = (i.y * (display_y - buffer * 2) + buffer);
