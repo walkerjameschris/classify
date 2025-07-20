@@ -53,7 +53,7 @@ struct Simulation {
         return sum(x) / float(x.size());
     }
 
-    static float sd(std::vector<float> x) {
+   static float sd(std::vector<float> x) {
 
         float x_mean = mean(x);
 
@@ -66,50 +66,54 @@ struct Simulation {
 
     static void best_split(
         Data data,
-        float& final_sd,
         float& final_split,
-        bool first_column
+        bool& first_column
     ) {
 
+        std::vector<float> orig;
         bool first_iter = true;
+        float final_info_gain;
         
         for (auto& split_row : data.contents) {
+            for (int i = 1; i <= 2; i++) {
 
-            float sd_diff;
-            float split = split_row.y;
-
-            if (first_column) {
-                split = split_row.x;
-            }
-            
-            std::vector<float> lower;
-            std::vector<float> upper;
-
-            for (auto& row : data.contents) {
-
-                float value = row.y;
-
-                if (first_column) {
-                    value = row.x;
+                float sd_diff;
+                float split = split_row.y;
+                orig.push_back(split_row.group);
+    
+                if (i == 1) {
+                    split = split_row.x;
                 }
-
-                if (value < split) {
-                    lower.push_back(row.group);
-                } else {
-                    upper.push_back(row.group);
+                
+                std::vector<float> lower;
+                std::vector<float> upper;
+    
+                for (auto& row : data.contents) {
+    
+                    float value = row.y;
+    
+                    if (i == 1) {
+                        value = row.x;
+                    }
+    
+                    if (value < split) {
+                        lower.push_back(row.group);
+                    } else {
+                        upper.push_back(row.group);
+                    }
                 }
-            }
-
-            if (lower.size() == 0 | upper.size() == 0) {
-                continue;
-            }
-
-            sd_diff = abs(sd(lower) - sd(upper));
-
-            if (first_iter | (sd_diff > final_sd)) {
-                final_sd = sd_diff;
-                final_split = split;
-                first_iter = false;
+    
+                if (lower.size() == 0 | upper.size() == 0) {
+                    continue;
+                }
+    
+                float info_gain = abs(sd(orig) - (sd(lower) + sd(upper)));
+    
+                if (first_iter | (info_gain > final_info_gain)) {
+                    final_split = split;
+                    first_column = int(i == 1);
+                    final_info_gain = info_gain;
+                }
             }
         }
     }
@@ -160,6 +164,12 @@ struct Simulation {
 
     static std::unique_ptr<Node> learn(Data local_data, int depth) {
 
+        Data lower;
+        Data upper;
+        
+        float split;
+        bool first_column;
+        
         std::vector<float> result_vec;
 
         for (auto& row : local_data.contents) {
@@ -168,31 +178,12 @@ struct Simulation {
 
         float result = mean(result_vec);
 
-        if (local_data.contents.size() < 5) {
+        if (local_data.contents.size() < 2) {
             auto node_final = make_node(depth, 0.0, result, true, false);
             return node_final;
         }
 
-        float first_sd;
-        float first_split;
-        
-        float second_sd;
-        float second_split;
-
-        best_split(local_data, first_sd, first_split, true);
-        best_split(local_data, second_sd, second_split, false);
-
-        bool first_column = true;
-        float split = first_split;
-        
-        if (first_sd < second_sd) {
-            first_column = false;
-            split = second_split;
-        }
-        
-        Data lower;
-        Data upper;
-    
+        best_split(local_data, split, first_column);
         divide(local_data, lower, upper, split, first_column);
 
         auto node = make_node(
@@ -209,27 +200,31 @@ struct Simulation {
         return node;
     }
 
-    static float predict(Point x, const std::unique_ptr<Node>& tree) {
+    static float predict(
+        Point x,
+        const std::unique_ptr<Node>& tree,
+        int max_depth
+    ) {
         
         if (!tree) {
             return 0.0f;
         }
     
-        if (tree->is_leaf) {
+        if (tree->is_leaf || tree->depth >= max_depth) {
             return tree->result;
         }
     
         if (tree->first_column) {
             if (x.x < tree->split) {
-                return predict(x, tree->lower);
+                return predict(x, tree->lower, max_depth);
             } else {
-                return predict(x, tree->upper);
+                return predict(x, tree->upper, max_depth);
             }
         } else {
             if (x.y < tree->split) {
-                return predict(x, tree->lower);
+                return predict(x, tree->lower, max_depth);
             } else {
-                return predict(x, tree->upper);
+                return predict(x, tree->upper, max_depth);
             }
         }
     }
@@ -239,28 +234,47 @@ struct Simulation {
         tree = learn(data, 1);
     }
 
-    void render(sf::RenderWindow& window) {
+    void advance(
+        sf::RenderWindow& window,
+        int max_depth,
+        int display_x,
+        int display_y
+    ) {
         
         window.clear();
 
         sf::CircleShape circle;
         circle.setPointCount(32);
-        circle.setRadius(5);
         circle.setOrigin({1, 1});
 
-        for (float i = 0; i < 720; i++) {
-            for (float j = 0; j < 720; j++) {
-                float pred = round(predict({i, j}, tree));
-                circle.setPosition({i, j});
+        int step = 10;
+        int max_x = display_x / step;
+        int max_y = display_y / step;
+
+        for (float i = 0; i < max_x; i++) {
+            for (float j = 0; j < max_y; j++) {
+                
+                float pred = predict(
+                    {i * step, j * step},
+                    tree,
+                    max_depth
+                );
+                
+                circle.setPosition({i * step, j * step});
+                circle.setRadius(step);
+                
                 if (pred < 0.5) {   
-                    circle.setFillColor(sf::Color::Red);
+                    circle.setFillColor({21, 126, 192, 50});
                 } else {
-                    circle.setFillColor(sf::Color::Blue);
+                    circle.setFillColor({245, 145, 48, 50});
                 }
+                
                 window.draw(circle);
             }
         }
-    
+        
+        circle.setRadius(5);
+        
         for (auto& i : data.contents) {
             circle.setPosition({i.x, i.y});
             circle.setFillColor(i.color);
@@ -269,8 +283,4 @@ struct Simulation {
         
         window.display(); 
     }
-
-    void advance(sf::RenderWindow& window) {
-        render(window);
-    };
 };
